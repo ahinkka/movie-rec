@@ -8,14 +8,14 @@ import sys
 from datetime import datetime as dt
 
 import numpy as np
-import pandas as pd
 
 from sklearn.decomposition import NMF
-from scipy.spatial.distance import cosine as cosine_distance
-from scipy.spatial.distance import jaccard as jaccard_distance
+from scipy.spatial import distance
+
+import movielens_util
 
 
-Model = collections.namedtuple('Model', ['movies', 'W', 'H', 'V'])
+Model = collections.namedtuple('Model', ['movies', 'movieIdToIndex', 'W', 'H', 'V'])
 
 
 def log(*args, **kwargs):
@@ -31,44 +31,32 @@ def distances(embedding_matrix, index):
         # log(index, i)
         # log('\t', embedding_matrix[index])
         # log('\t', embedding_matrix[i])
-        distances.append((i, cosine_distance(embedding_matrix[index],
+        # distances.append((i, distance.euclidean(embedding_matrix[index],
+        #                                         embedding_matrix[i])))
+        distances.append((i, distance.cosine(embedding_matrix[index],
                                              embedding_matrix[i])))
-        # distances.append((i, jaccard_distance(embedding_matrix[index],
+        # distances.append((i, distance.jaccard(embedding_matrix[index],
         #                                       embedding_matrix[i])))
     return distances
 
 
 def nearest_neighbors(embedding_matrix, index, count):
     return sorted(distances(embedding_matrix, index),
-                  key=operator.itemgetter(1), reverse=True)[0:count]
+                  key=operator.itemgetter(1))[0:count]
 
 
-def build_and_write(movies_file, ratings_file, model_file,
-                    movie_count, user_count, feature_count):
+def build_model(movielens_dir, training_percentage, feature_count, user_count, movie_count):
+    total_user_count = 138492 # TODO: make this not fixed...
     start = dt.now()
-    all_movies = pd.read_csv(movies_file)
-    all_movies['movieId'] = all_movies['movieId'].apply(pd.to_numeric)
-    if movie_count != -1:
-        movies = all_movies.head(movie_count)
-    else:
-        movies = all_movies
-    include_movies = list(movies['movieId'])
 
-    # https://pandas.pydata.org/pandas-docs/stable/generated/pandas.read_csv.html
-    all_ratings = pd.read_csv(ratings_file)
-    if user_count != -1:
-        include_users = list(np.sort(all_ratings['userId'].unique())[0:user_count])
-    else:
-        include_users = list(np.sort(all_ratings['userId'].unique()))
+    movies = movielens_util.read_movies(movielens_dir)
+    movieIdToIndex = {}
+    for index, row in enumerate(movies.itertuples()):
+        movieIdToIndex[row.movieId] = index
 
-    ratings = all_ratings[all_ratings.movieId.isin(include_movies)]
-    ratings = ratings[ratings.userId.isin(include_users)]
-
-    # Because we don't include all users, some movies are completely without
-    # ratings and hence we end up without these movies; filter out movies with
-    # no ratings. We should probably include them, but for now it's like this.
-    movies = movies[movies.movieId.isin(ratings.movieId.unique())]
-    log(movies)
+    ratings = movielens_util.read_ratings(movielens_dir,
+                                          skip_percentage=0,
+                                          include_percentage=training_percentage)
 
     # make ratings binary
     rating_mapping = { 0.0: 0,
@@ -77,38 +65,54 @@ def build_and_write(movies_file, ratings_file, model_file,
 
     data_mangled = dt.now()
     log("Read in data, took {}s".format((data_mangled - start).total_seconds()))
-    log('Movies:')
-    log(movies.head())
-    log('Ratings:')
-    log(ratings.head())
+
+    # log('Movies:')
+    # log(movies.head())
+    # log('Ratings:')
+    # log(ratings.head())
 
     # W x H = V; V is the original matrix
     #  V is a user-movie matrix,
     #  W is a user-feature matrix, and
     #  H is a feature-movie matrix.
 
-    V = ratings.pivot(index='userId', columns='movieId', values='rating').fillna(0)
-    log("Data massaged into NMF format, took {}s".format((dt.now() - data_mangled).total_seconds()))
-    log("NMF format:")
-    log(V.head())
+    V = np.zeros((total_user_count, len(movies)))
+    log("V shape:", V.shape)
+    for index, rating in enumerate(ratings.itertuples()):
+        V[(rating.userId - 1, movieIdToIndex[rating.movieId])] = 1.0
 
+    if user_count > -1 and movie_count > -1:
+        log("Indexing V with :{}:, :{}:".format(user_count, movie_count))
+        V = V[:user_count:, :movie_count:]
+        log("V shape:", V.shape)
+
+    included_movieIds = []
+    for movie in movies.itertuples():
+        if movieIdToIndex[movie.movieId] < movie_count:
+            included_movieIds.append(movie.movieId)
+
+    movies = movies[movies.movieId.isin(included_movieIds)]
+
+    v_formed = dt.now()
+    log("V formed in {}s".format((v_formed - data_mangled).total_seconds()))
     model = NMF(n_components=feature_count, init='random', random_state=0)
+    log("Starting model fitting...")
     W = model.fit_transform(V)
+    log("Model fitted in {}s".format((dt.now() - v_formed).total_seconds()))
     H = model.components_
 
     log("W shape: {} (user-feature)".format(W.shape))
     log("H shape: {} (feature-movie)".format(H.shape))
     log("V shape: {} (user-movie)".format(V.shape))
 
-    m = Model(movies=movies, W=W, H=H, V=V)
-    log('Writing model to file {}'.format(model_file))
-    pickle.dump(m, model_file)
-    os.fsync(model_file.fileno())
+    m = Model(movies=movies, movieIdToIndex=movieIdToIndex, W=W, H=H, V=V)
 
     log('Model tuple contains the following types:')
     for key in m._asdict().keys():
         value = getattr(m, key)
         log('', key, type(value), sep='\t')
+
+    return m
 
 
 def recommend(model_file):
@@ -133,17 +137,17 @@ def recommend(model_file):
 
 
 if __name__ == '__main__':
-    import argparse
+    import argparse, patharg
     parser = argparse.ArgumentParser()
     subparsers = parser.add_subparsers(help='sub-command help', dest='command')
 
     build_parser = subparsers.add_parser('build', help='build help')
-    build_parser.add_argument('movies_file', type=argparse.FileType('r'))
-    build_parser.add_argument('ratings_file', type=argparse.FileType('r'))
+    build_parser.add_argument('movielens_dir', type=patharg.PathType(exists=True, type='dir'))
     build_parser.add_argument('model_file', type=argparse.FileType('xb'))
-    build_parser.add_argument('--movie-count', type=int, default=-1)
+    build_parser.add_argument('--training-set-percentage', type=int, default=80)
     build_parser.add_argument('--user-count', type=int, default=-1)
-    build_parser.add_argument('--feature-count', type=int, default=50)
+    build_parser.add_argument('--movie-count', type=int, default=-1)
+    build_parser.add_argument('--feature-count', type=int, default=150)
 
     query_parser = subparsers.add_parser('query', help='query help')
     query_parser.add_argument('model_file', type=argparse.FileType('rb'))
@@ -151,8 +155,11 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     if args.command == 'build':
-        build_and_write(args.movies_file, args.ratings_file, args.model_file,
-                        args.movie_count, args.user_count, args.feature_count)
+        model = build_model(args.movielens_dir, args.training_set_percentage,
+                            args.feature_count, args.user_count, args.movie_count)
+        log('Writing model to file {}'.format(args.model_file))
+        pickle.dump(model, args.model_file)
+        os.fsync(args.model_file.fileno())
     elif args.command == 'query':
         recommend(args.model_file)
     else:
