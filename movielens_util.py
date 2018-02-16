@@ -1,10 +1,17 @@
 import math
+import pickle
 import os
+import shutil
+import sys
 
 import pandas as pd
 
+RANDOM_STATE = 1101
 
-# https://pandas.pydata.org/pandas-docs/stable/generated/pandas.read_csv.html
+
+def log(*args, **kwargs):
+    kwargs['file'] = sys.stderr
+    return print(*args, **kwargs)
 
 
 def read_movies(movielens_dir):
@@ -13,24 +20,53 @@ def read_movies(movielens_dir):
     return result
 
 
-def read_ratings(movielens_dir, skip_percentage=0, include_percentage=100):
+def read_ratings(movielens_dir, train_or_test=None):
+    if train_or_test == 'train':
+        train_file = os.path.join(movielens_dir, 'ratings-train.pickle')
+        with open(train_file, 'rb') as f:
+            return pickle.load(f)
+    elif train_or_test == 'test':
+        test_file = os.path.join(movielens_dir, 'ratings-test.pickle')
+        with open(test_file, 'rb') as f:
+            return pickle.load(f)
+
     ratings_file = os.path.join(movielens_dir, 'ratings.csv')
-    ratings_mtime = os.stat(ratings_file).st_mtime
-
-    # don't do this if the file is untouched; useless to count lines
-    if ratings_mtime == 1427836442.0:
-        line_count = 20000264
-    else:
-        line_count = 0
-        with open(ratings_file, 'r') as f:
-            for line in f:
-                line_count += 1
-
-    skip_rows = math.floor(skip_percentage * 0.01 * line_count)
-    take_rows = math.floor(include_percentage * 0.01 * line_count)
-    result = pd.read_csv(ratings_file,
-                         skiprows=skip_rows, nrows=take_rows)
+    result = pd.read_csv(ratings_file)
     result['movieId'] = result['movieId'].apply(pd.to_numeric)
     result['userId'] = result['userId'].apply(pd.to_numeric)
     result['rating'] = result['rating'].apply(pd.to_numeric)
     return result
+
+
+def main():
+    import argparse, patharg
+    parser = argparse.ArgumentParser()
+    parser.add_argument('movielens_dir', type=patharg.PathType(exists=True, type='dir'))
+    args = parser.parse_args()
+
+    train_file = os.path.join(args.movielens_dir, 'ratings-train.pickle')
+    test_file = os.path.join(args.movielens_dir, 'ratings-test.pickle')
+    if os.path.exists(train_file):
+        parser.error('{} exists, not clobbering'.format(train_file))
+    if os.path.exists(test_file):
+        parser.error('{} exists, not clobbering'.format(test_file))
+
+    log('Reading in ratings...')
+    all_ratings = read_ratings(args.movielens_dir)
+    log('Read {} ratings'.format(all_ratings.size))
+
+    train = all_ratings.sample(frac=0.8, random_state=RANDOM_STATE)
+    test = all_ratings.drop(train.index)
+    log('Split into training set with {} ratings and test set of {} ratings'
+        .format(train.size, test.size))
+
+    with open(train_file, 'xb') as f:
+        pickle.dump(train, f)
+        log('Training ratings saved into {}'.format(train_file))
+    with open(test_file, 'xb') as f:
+        pickle.dump(test, f)
+        log('Testing ratings saved into {}'.format(test_file))
+
+
+if __name__ == '__main__':
+    main()
