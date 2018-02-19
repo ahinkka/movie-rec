@@ -188,6 +188,9 @@ def similar(model, vis=False):
         plt.colorbar(imshow)
         plt.show()
 
+        # TODO: when hovering over the array, show movie names
+        # https://stackoverflow.com/questions/20637113/possible-to-make-labels-appear-when-hovering-over-a-point-in-matplotlib-in-stem
+
 
 def sample_embeddings(model, embedding_count=250):
     movie_feature_embedding_matrix = np.transpose(model.H)
