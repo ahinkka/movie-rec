@@ -6,6 +6,7 @@ import os
 import pickle
 import random
 import sys
+import warnings
 
 from datetime import datetime as dt
 
@@ -13,6 +14,7 @@ import numpy as np
 
 from sklearn.decomposition import NMF
 from scipy.spatial import distance
+import matplotlib.pyplot as plt
 
 import movielens_util
 
@@ -31,12 +33,10 @@ def distances(embedding_matrix, index, distance_function=distance.cosine):
     for i in range(embedding_matrix.shape[0]):
         if i == index:
             continue
-        # log()
-        # log(index, i)
-        # log('#', embedding_matrix[index])
-        # log('#', embedding_matrix[i])
-        distances.append((i, distance_function(embedding_matrix[index],
-                                               embedding_matrix[i])))
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            distances.append((i, distance_function(embedding_matrix[index],
+                                                   embedding_matrix[i])))
     return distances
 
 
@@ -165,7 +165,7 @@ def evaluate(model, movielens_dir):
     log('RMSE (test)', math.sqrt(mse), sep='\t')
     
 
-def similar(model):
+def similar(model, vis=False):
     # log("W shape: {} (user-feature)".format(model.W.shape))
     # log("H shape: {} (feature-movie)".format(model.H.shape))
     # log("V shape: {} (user-movie)".format(model.V.shape))
@@ -178,10 +178,24 @@ def similar(model):
     movie = model.movies.sample(1)
     log()
     log(movie.iloc[0].title, '\t', movie.iloc[0].genres)
-    index = movie.index.data[0]
-    for index, distance in nearest_neighbors(movie_feature_embedding_matrix, index, 10):
+    from_index = movie.index.data[0]
+
+    vis_vecs = []
+    vis_vecs.append(movie_feature_embedding_matrix[from_index])
+    for index, distance in nearest_neighbors(movie_feature_embedding_matrix, from_index, 10):
         m = model.movies.iloc[index]
         log("", m.title, m.genres, distance, sep='\t')
+        vis_vecs.append(movie_feature_embedding_matrix[index])
+
+    if vis:
+        arr = np.array(vis_vecs)
+        imshow = plt.imshow(arr)
+        plt.title('Similar movies; first one is the ')
+        # set the limits of the plot to the limits of the data
+        # plt.axis([x.min(), x.max(), y.min(), y.max()])
+        plt.colorbar(imshow)
+        plt.show()
+        # plt.pcolormesh(*args, **kwargs)
 
 
 if __name__ == '__main__':
@@ -198,6 +212,9 @@ if __name__ == '__main__':
 
     similar_parser = subparsers.add_parser('similar', help='similar help')
     similar_parser.add_argument('model_file', type=argparse.FileType('rb'))
+
+    similar_vis_parser = subparsers.add_parser('similar-vis', help='similar-vis help')
+    similar_vis_parser.add_argument('model_file', type=argparse.FileType('rb'))
 
     evaluate_parser = subparsers.add_parser('evaluate', help='evaluate help')
     evaluate_parser.add_argument('model_file', type=argparse.FileType('rb'))
@@ -216,5 +233,8 @@ if __name__ == '__main__':
     elif args.command == 'similar':
         model = pickle.load(args.model_file)
         similar(model)
+    elif args.command == 'similar-vis':
+        model = pickle.load(args.model_file)
+        similar(model, vis=True)
     else:
         parser.error('unknown command "{}"'.format(args.command))
