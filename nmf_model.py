@@ -166,15 +166,7 @@ def evaluate(model, movielens_dir):
     
 
 def similar(model, vis=False):
-    # log("W shape: {} (user-feature)".format(model.W.shape))
-    # log("H shape: {} (feature-movie)".format(model.H.shape))
-    # log("V shape: {} (user-movie)".format(model.V.shape))
-
     movie_feature_embedding_matrix = np.transpose(model.H)
-    # log(movie_feature_embedding_matrix.shape)
-    # log(model.movies)
-    # return
-    # log(movie_feature_embedding_matrix)
     movie = model.movies.sample(1)
     log()
     log(movie.iloc[0].title, '\t', movie.iloc[0].genres)
@@ -190,12 +182,26 @@ def similar(model, vis=False):
     if vis:
         arr = np.array(vis_vecs)
         imshow = plt.imshow(arr)
-        plt.title('Similar movies; first one is the ')
+        plt.title('Similar movies; first one is the one computing similarities for')
         # set the limits of the plot to the limits of the data
         # plt.axis([x.min(), x.max(), y.min(), y.max()])
         plt.colorbar(imshow)
         plt.show()
-        # plt.pcolormesh(*args, **kwargs)
+
+
+def sample_embeddings(model, embedding_count=250):
+    movie_feature_embedding_matrix = np.transpose(model.H)
+    movie = model.movies.sample(1)
+
+    embeddings = movie_feature_embedding_matrix[
+        np.random.randint(movie_feature_embedding_matrix.shape[0], size=embedding_count), :]
+    embeddings = np.log(embeddings)
+
+    arr = np.array(embeddings)
+    imshow = plt.imshow(arr)
+    plt.title('Movie embeddings, sample of {}, values log()'.format(embedding_count))
+    plt.colorbar(imshow)
+    plt.show()
 
 
 if __name__ == '__main__':
@@ -215,6 +221,10 @@ if __name__ == '__main__':
 
     similar_vis_parser = subparsers.add_parser('similar-vis', help='similar-vis help')
     similar_vis_parser.add_argument('model_file', type=argparse.FileType('rb'))
+
+    sample_embeddings_parser = \
+      subparsers.add_parser('sample-embeddings', help='similar- help')
+    sample_embeddings_parser.add_argument('model_file', type=argparse.FileType('rb'))
 
     evaluate_parser = subparsers.add_parser('evaluate', help='evaluate help')
     evaluate_parser.add_argument('model_file', type=argparse.FileType('rb'))
@@ -236,5 +246,8 @@ if __name__ == '__main__':
     elif args.command == 'similar-vis':
         model = pickle.load(args.model_file)
         similar(model, vis=True)
+    elif args.command == 'sample-embeddings':
+        model = pickle.load(args.model_file)
+        sample_embeddings(model)
     else:
         parser.error('unknown command "{}"'.format(args.command))
