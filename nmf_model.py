@@ -14,7 +14,6 @@ import numpy as np
 
 from sklearn.decomposition import NMF
 from scipy.spatial import distance
-import matplotlib.pyplot as plt
 
 import movielens_util
 
@@ -180,6 +179,7 @@ def similar(model, vis=False):
         vis_vecs.append(movie_feature_embedding_matrix[index])
 
     if vis:
+        import matplotlib.pyplot as plt
         arr = np.array(vis_vecs)
         imshow = plt.imshow(arr)
         plt.title('Similar movies; first one is the one computing similarities for')
@@ -198,6 +198,7 @@ def sample_embeddings(model, embedding_count=250):
     embeddings = np.log(embeddings)
 
     arr = np.array(embeddings)
+    import matplotlib.pyplot as plt
     imshow = plt.imshow(arr)
     plt.title('Movie embeddings, sample of {}, values log()'.format(embedding_count))
     plt.colorbar(imshow)
